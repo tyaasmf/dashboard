@@ -1,0 +1,708 @@
+---
+title: "PANTAU COVID-19 JAWA BARAT"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+runtime: shiny 
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(tidyverse)
+library(leaflet)
+library(sf)
+library(RColorBrewer)
+library(plotly)
+library(DT)
+```
+
+```{r data}
+covid <- read.csv("data.csv")
+covid$confirmation_aktif <- covid$confirmation - covid$confirmation_selesai - covid$confirmation_meninggal
+dataPenduduk <- read.csv("Penduduk JABAR.csv")[,c(1,2,5)]
+colnames(dataPenduduk) <- c("Wilayah", "IDKAB2", "jumlah_penduduk")
+datagab <- left_join(covid, dataPenduduk[,2:3], by = "IDKAB2")
+sdm <- read.csv("SDM Kesehatan JABAR.csv")[,-1]
+```
+
+# Peta Sebaran
+
+Column {.sidebar data-width=280}
+-----------------------------------------------------------------------
+
+##### **Informasi di samping akan memberikan gambaran sebaran kasus COVID-19 harian di Jawa Barat secara kumulatif sejak tanggal 1 Agustus 2020.** 
+##### Silakan pilih Tanggal (bulan/tanggal/tahun) untuk melihat Sebaran kasus pada tanggal yang diinginkan.
+
+```{r date input}
+selectInput("tanggal", 
+            "Tanggal (bulan/tanggal/tahun) :", 
+            choices=unique(covid$tanggal), 
+            selected=tail(unique(covid$tanggal),1))
+```
+
+##### Persentase Sebaran Kasus Terkonfirmasi Positif, Sembuh dan Meninggal pada tanggal terpilih 
+
+```{r pie all}
+pie_all <- reactive({
+  nilai <- covid %>% 
+    filter(tanggal == input$tanggal) %>% 
+    select(confirmation_aktif,
+           confirmation_selesai,
+           confirmation_meninggal)
+  rekap <- data.frame(label = c("Total Kasus Sembuh",
+                                "Total Kasus Meninggal",
+                                "Total Kasus Aktif"),
+                      nilai = c(sum(nilai$confirmation_selesai),
+                                sum(nilai$confirmation_meninggal),
+                                sum(nilai$confirmation_aktif)))
+  return(rekap)
+})
+
+warna <- c("#78AED3", "#AAC9DD", "#F0C286")
+
+renderPlotly({
+  plot_ly(pie_all(), 
+          labels=~label, 
+          values=~nilai, 
+          type="pie",
+          textposition="outside",
+          marker=list(colors = warna),
+          showlegend=TRUE
+          ) %>%
+    layout(xaxis = list(showgrid=FALSE, 
+                        zeroline=FALSE, 
+                        showticklabels=FALSE),
+           yaxis = list(showgrid=FALSE, 
+                        zeroline=FALSE, 
+                        showticklabels=FALSE),
+           paper_bgcolor="#DDE6F0",
+           legend = list(orientation="h", # show entries horizontally
+                         xanchor="right",  # use center of legend as anchor
+                         x=0,
+                         y=1.05))
+})
+
+```
+
+
+Row {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+
+### Sembuh
+
+```{r maps sembuh}
+jabar_map2 <- reactive({
+        map <- st_read("petajabar27/Peta Jabar 27.shp")
+        recovery <- covid %>% 
+            filter(tanggal == input$tanggal) %>%
+            select(IDKAB2, confirmation_selesai)
+        recovery$IDKAB2 <- as.character(recovery$IDKAB2)
+        value <- left_join(map, recovery, by = "IDKAB2")
+        return(value)
+    })
+
+renderLeaflet({
+        
+        pal <- colorBin(
+            palette = "Purples", 5,
+            domain = jabar_map2()$confirmation_selesai)
+        
+        jabar_map2() %>%
+            leaflet() %>%
+            addProviderTiles(provider = "CartoDB.Positron") %>%
+            addPolygons(
+                color = ~pal(jabar_map2()$confirmation_selesai),
+                weight = 1,
+                opacity = 1,
+                dashArray = "2",
+                fillOpacity = 0.7,
+                
+                highlight = highlightOptions(
+                    weight = 1,
+                    color = "#000000",
+                    dashArray = "1",
+                    fillOpacity = 1,
+                    bringToFront = TRUE),
+                
+                label = paste0(jabar_map2()$KABKOT, " ", jabar_map2()$confirmation_selesai),
+                
+                labelOptions = labelOptions(
+                    style = list("font-weight" = "normal", padding = "3px 8px"),
+                    textsize = "15px",
+                    direction = "auto")) %>%
+            
+            addLegend(
+                position = "bottomright",
+                pal = pal,
+                values = ~jabar_map2()$confirmation_selesai,
+                title = "Kasus Sembuh Kumulatif")
+        
+    })
+```
+
+### Meninggal
+
+```{r maps meninggal}
+jabar_map3 <- reactive({
+        map <- st_read("petajabar27/Peta Jabar 27.shp")
+        death <- covid %>% 
+            filter(tanggal == input$tanggal) %>%
+            select(IDKAB2, confirmation_meninggal)
+        death$IDKAB2 <- as.character(death$IDKAB2)
+        value <- left_join(map, death, by = "IDKAB2")
+        return(value)
+    })
+
+renderLeaflet({
+        
+        pal <- colorBin(
+            palette = "Reds", 5,
+            domain = jabar_map3()$confirmation_meninggal)
+        
+        jabar_map3() %>%
+            leaflet() %>%
+            addProviderTiles(provider = "CartoDB.Positron") %>%
+            addPolygons(
+                color = ~pal(jabar_map3()$confirmation_meninggal),
+                weight = 1,
+                opacity = 1,
+                dashArray = "2",
+                fillOpacity = 0.7,
+                
+                highlight = highlightOptions(
+                    weight = 1,
+                    color = "#000000",
+                    dashArray = "1",
+                    fillOpacity = 1,
+                    bringToFront = TRUE),
+                
+                label = paste0(jabar_map3()$KABKOT, " ", jabar_map3()$confirmation_meninggal),
+                
+                labelOptions = labelOptions(
+                    style = list("font-weight" = "normal", padding = "3px 8px"),
+                    textsize = "15px",
+                    direction = "auto")) %>%
+            
+            addLegend(
+                position = "bottomright",
+                pal = pal,
+                values = ~jabar_map3()$confirmation_meninggal,
+                title = "Kasus Meninggal Kumulatif")
+        
+    })
+```
+
+### Kasus Aktif
+
+```{r maps aktif}
+jabar_map4 <- reactive({
+        map <- st_read("petajabar27/Peta Jabar 27.shp")
+        activecase <- covid %>% 
+            filter(tanggal == input$tanggal) %>%
+            select(IDKAB2, 
+                   confirmation, 
+                   confirmation_selesai, 
+                   confirmation_meninggal) %>%
+            mutate(active = confirmation-confirmation_selesai-confirmation_meninggal) %>%
+            select(IDKAB2, active)
+        activecase$IDKAB2 <- as.character(activecase$IDKAB2)
+        value <- left_join(map, activecase, by = "IDKAB2")
+        return(value)
+    })
+
+renderLeaflet({
+        
+        pal <- colorBin(
+            palette = "Greens", 5,
+            domain = jabar_map4()$active)
+        
+        jabar_map4() %>%
+            leaflet() %>%
+            addProviderTiles(provider = "CartoDB.Positron") %>%
+            addPolygons(
+                color = ~pal(jabar_map4()$active),
+                weight = 1,
+                opacity = 1,
+                dashArray = "2",
+                fillOpacity = 0.7,
+                
+                highlight = highlightOptions(
+                    weight = 1,
+                    color = "#000000",
+                    dashArray = "1",
+                    fillOpacity = 1,
+                    bringToFront = TRUE),
+                
+                label = paste0(jabar_map4()$KABKOT, " ", jabar_map4()$active),
+                
+                labelOptions = labelOptions(
+                    style = list("font-weight" = "normal", padding = "3px 8px"),
+                    textsize = "15px",
+                    direction = "auto")) %>%
+            
+            addLegend(
+                position = "bottomright",
+                pal = pal,
+                values = ~jabar_map4()$active,
+                title = "Kasus Aktif Kumulatif")
+        
+    })
+```
+
+### Terkonfirmasi Positif
+
+```{r positif}
+jabar_map <- reactive({
+        map <- st_read("petajabar27/Peta Jabar 27.shp")
+        newcases <- covid %>% 
+            filter(tanggal == input$tanggal) %>%
+            select(IDKAB2, confirmation)
+        newcases$IDKAB2 <- as.character(newcases$IDKAB2)
+        value <- left_join(map, newcases, by = "IDKAB2")
+        return(value)
+    })
+
+top5 <- reactive({
+    confirm <- covid %>% 
+    filter(tanggal == input$tanggal & nama_kab != "BELUM TERIDENTIFIKASI") %>%
+    select(nama_kab, confirmation) %>%
+    arrange(desc(confirmation)) %>%
+    head(5)
+  return(confirm)
+})
+```
+
+```{r maps pos}
+renderLeaflet({
+        
+        pal <- colorBin(
+            palette = "PuBu", 5,
+            domain = jabar_map()$confirmation)
+        
+        jabar_map() %>%
+            leaflet() %>%
+            addProviderTiles(provider = "CartoDB.Positron") %>%
+            addPolygons(
+                color = ~pal(jabar_map()$confirmation),
+                weight = 1,
+                opacity = 1,
+                dashArray = "2",
+                fillOpacity = 0.7,
+                
+                highlight = highlightOptions(
+                    weight = 1,
+                    color = "#000000",
+                    dashArray = "1",
+                    fillOpacity = 1,
+                    bringToFront = TRUE),
+                
+                label = paste0(jabar_map()$KABKOT, " ",
+                               jabar_map()$confirmation),
+                
+                labelOptions = labelOptions(
+                    style = list("font-weight" = "normal", 
+                                 padding = "3px 8px"),
+                    textsize = "15px",
+                    direction = "auto")) %>%
+            
+            addLegend(
+                position = "bottomright",
+                pal = pal,
+                values = ~jabar_map()$confirmation,
+                title = "Kasus Terkonfirmasi Positif Kumulatif")
+        
+    })
+```
+
+### Bubble Plot
+
+```{r bubble}
+bubble <- reactive({
+  nilai <- datagab %>%
+    filter(tanggal == input$tanggal & nama_kab != "BELUM TERIDENTIFIKASI") %>%
+    select(nama_kab, confirmation, confirmation_aktif, jumlah_penduduk) %>%
+  return(nilai)
+})
+
+renderPlotly({
+  plot_ly(bubble(), 
+          x=~`confirmation`, 
+          y=~`confirmation_aktif`, 
+          color=~`nama_kab`, 
+          type="scatter", 
+          mode="markers", 
+          size=~`jumlah_penduduk`,
+          marker=list(symbol='circle', 
+                      sizemode='diameter', 
+                      line=list(width=1, color='#FFFFFF'), 
+                      opacity=0.4)) %>%
+    layout(xaxis = list(title = 'Total Kasus Terkonfirmasi Positif'), 
+           yaxis = list(title = 'Total Kasus Aktif'))
+})
+```
+
+Row {stat-heigth=100}
+-----------------------------------------------------------------------
+
+### Total Sembuh {.value-box}
+
+```{r total sembuh}
+total_sembuh <- reactive({
+  nilai <- covid %>%
+    filter(tanggal == input$tanggal) %>%
+    select(confirmation_selesai) %>%
+    sum()
+  return(nilai)
+})
+
+renderValueBox({
+  valueBox(
+    value=total_sembuh(),
+    icon="fa-medkit",
+    color="#78AED3"
+  )
+})
+```
+
+### Total Kematian {.value-box}
+
+```{r mati}
+total_mati <- reactive({
+  nilai <- covid %>%
+    filter(tanggal == input$tanggal) %>%
+    select(confirmation_meninggal) %>%
+    sum()
+  return(nilai)
+})
+
+renderValueBox({
+  valueBox(
+    value=total_mati(),
+    icon="fa-bed",
+    color="#AAC9DD"
+  )
+})
+```
+
+### Total Kasus Aktif {.value-box}
+
+```{r active}
+total_active <- reactive({
+  nilai <- covid %>%
+    filter(tanggal == input$tanggal) %>%
+    select(confirmation, confirmation_selesai, confirmation_meninggal) %>%
+    mutate(aktif = confirmation-confirmation_selesai-confirmation_meninggal) %>%
+    select(aktif) %>%
+    sum()
+  return(nilai)
+})
+
+renderValueBox({
+  valueBox(
+    value=total_active(),
+    icon="fa-user-o",
+    color="#f0c286"
+  )
+})
+```
+
+### Total Kasus Terkonfirmasi Positif {.value-box} 
+
+```{r total kasus}
+total_kasus <- reactive({
+  nilai <- covid %>%
+    filter(tanggal == input$tanggal) %>%
+    select(confirmation) %>%
+    sum()
+  return(nilai)
+})
+
+renderValueBox({
+  valueBox(
+    value=total_kasus(),
+    icon = "fa-plus-circle",
+    #icon=icon("fas fa-viruses", lib = "font-awesome"),
+    color="#4F77AA"
+  )
+})
+```
+
+# Tren Daerah
+
+Column {.sidebar data-width=270}
+-----------------------------------------------------------------------
+
+##### **Grafik yang ditampilkan merupakan informasi dari tiap daerah yang dipilih sejak 1 Agustus 2020.**
+##### Silakan pilih daerah (Kota/Kabupaten) untuk melihat pergerakan kasus Konfirmasi positif, Sembuh, Meninggal dan Aktif harian.
+
+```{r}
+selectInput("daerah", "Pilih Kab/Kota :", choices=unique(covid$nama_kab)[-1])
+```
+
+##### Persentase Sebaran Kasus Terkonfirmasi Positif, Sembuh dan Meninggal pada Kab/Kota terpilih
+
+```{r pie daerah}
+pie_daerah <- reactive({
+  nilai <- covid %>% 
+    filter(nama_kab == input$daerah) %>% 
+    select(confirmation_aktif,
+           confirmation_selesai,
+           confirmation_meninggal) %>%
+    tail(1)
+  rekap <- data.frame(label = c("Total Kasus Sembuh",
+                                "Total Kasus Meninggal",
+                                "Total Kasus Aktif"),
+                      nilai = c(nilai$confirmation_selesai,
+                                nilai$confirmation_meninggal,
+                                nilai$confirmation_aktif))
+  return(rekap)
+})
+
+warna_daerah <- c("#7DCFB6", "#F79256", "#FBD1A2")
+
+renderPlotly({
+  plot_ly(pie_daerah(), 
+          labels=~label, 
+          values=~nilai, 
+          type="pie",
+          textposition="outside",
+          marker=list(colors = warna_daerah),
+          showlegend=TRUE) %>%
+    layout(xaxis = list(showgrid=FALSE, 
+                        zeroline=FALSE, 
+                        showticklabels=FALSE),
+           yaxis = list(showgrid=FALSE, 
+                        zeroline=FALSE, 
+                        showticklabels=FALSE),
+           paper_bgcolor="#DDE6F0",
+           legend = list(orientation="h", # show entries horizontally
+                         xanchor="right",  # use center of legend as anchor
+                         x=0,
+                         y=1.05))
+})
+
+```
+
+Row
+-----------------------------------------------------------------------
+    
+### Kasus Terkonfirmasi Positif
+
+```{r Tren_Positif}
+linepositif <- reactive({
+  dataline <- covid %>%
+    filter(nama_kab == input$daerah) %>%
+    select(tanggal, confirmation)
+  dataline$tanggal <- as.Date(dataline$tanggal, "%m/%d/%Y")
+  return(dataline)
+})
+
+renderPlotly({
+  ggplotly(
+    ggplot(linepositif(), aes(x=tanggal, y=confirmation)) +
+    geom_area(fill="#1d4e89", alpha=0.5) +
+    geom_line(color="#1d4e89") +
+    ylab("") +
+    xlab("") +
+    theme_classic())
+})
+```
+
+### Kasus Sembuh
+
+```{r Tren_Sembuh}
+linesembuh <- reactive({
+  dataline <- covid %>%
+    filter(nama_kab == input$daerah) %>%
+    select(tanggal, confirmation_selesai)
+  dataline$tanggal <- as.Date(dataline$tanggal, "%m/%d/%Y")
+  return(dataline)
+})
+
+renderPlotly({
+  ggplotly(
+    ggplot(linesembuh(), aes(x=tanggal, y=confirmation_selesai)) +
+    geom_area(fill="#7dcfb6", alpha=0.5) +
+    geom_line(color="#7dcfb6") +
+    ylab("") +
+    xlab("") +
+    theme_classic())
+})
+```
+
+Row
+-----------------------------------------------------------------------
+    
+### Kasus Meninggal
+    
+```{r Tren_Meninggal}
+linemati <- reactive({
+  dataline <- covid %>%
+    filter(nama_kab == input$daerah) %>%
+    select(tanggal, confirmation_meninggal)
+  dataline$tanggal <- as.Date(dataline$tanggal, "%m/%d/%Y")
+  return(dataline)
+})
+
+renderPlotly({
+  ggplotly(
+    ggplot(linemati(), aes(x=tanggal, y=confirmation_meninggal)) +
+    geom_area(fill="#f79256", alpha=0.5) +
+    geom_line(color="#f79256") +
+    ylab("") +
+    xlab("") +
+    theme_classic())
+})
+```
+    
+### Kasus Aktif
+
+```{r Tren_Aktif}
+lineactive <- reactive({
+  dataline <- covid %>%
+    filter(nama_kab == input$daerah) %>%
+    select(tanggal, 
+           confirmation, 
+           confirmation_selesai, 
+           confirmation_meninggal) %>%
+    mutate(active = confirmation-confirmation_selesai-confirmation_meninggal) %>%
+    select(tanggal, active)
+  dataline$tanggal <- as.Date(dataline$tanggal, "%m/%d/%Y")
+  return(dataline)
+})
+
+renderPlotly({
+  ggplotly(
+    ggplot(lineactive(), aes(x=tanggal, y=active)) +
+    geom_area(fill="#fbd1a2", alpha=0.5) +
+    geom_line(color="#fbd1a2") +
+    ylab("") +
+    xlab("") +
+    theme_classic())
+})
+```
+
+
+# Tabel
+
+Row {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+
+### Kasus COVID-19
+
+```{r }
+datagab2 <- datagab %>% 
+  filter(nama_kab != "BELUM TERIDENTIFIKASI") %>%
+  select(tanggal, 
+         nama_kab, 
+         confirmation, 
+         confirmation_selesai, 
+         confirmation_meninggal, 
+         confirmation_aktif)
+
+renderDataTable(
+  datatable(datagab2) %>% 
+    formatStyle(names(datagab2), 
+                background = styleColorBar(range(datagab2[6]), 'lightblue'), 
+                backgroundSize = '98% 88%', 
+                backgroundRepeat = 'no-repeat', 
+                backgroundPosition = 'center')
+)
+```
+
+### FASILITAS KESEHATAN
+
+```{r }
+renderDataTable(
+  datatable(sdm) %>% 
+    formatStyle(names(sdm), 
+                background = styleColorBar(range(sdm[5]), 'lightblue'), 
+                backgroundSize = '98% 88%', 
+                backgroundRepeat = 'no-repeat', 
+                backgroundPosition = 'center')
+)
+```
+
+
+# Tentang
+
+Row {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+
+### Keterangan
+  
+Dashboard ini diharapkan dapat memberikan informasi kepada pengakses tentang sebaran kasus Covid-19 harian di Jawa Barat secara kumulatif sejak tanggal 1 Agustus 2020.  
+  
+Pada **PETA SEBARAN** dapat dilihat:  
+1. *Update* sebaran total kasus terkonfirmasi positif untuk tanggal yang dipilih  
+2. *Update* sebaran total sembuh untuk tanggal yang dipilih  
+3. *Update* sebaran total kasus kematian untuk tanggal yang dipilih  
+4. *Update* sebaran total kasus aktif untuk tanggal yang dipilih  
+5. Daerah dengan total kasus dan kasus aktif berdasarkan jumlah penduduk  
+Dari *Bubble Plot*, dapat dilihat daerah yang pada tanggal yang dipilih adalah daerah yang berbahaya, yaitu sedang mengalami lonjakan kasus padahal total kasusnya relatif tidak terlalu tinggi (kiri atas), atau daerah total kasus aktifnya tinggi dengan total kasusnya juga tinggi (kanan atas). Sedangkan daerah sudah relatif aman adalah daerah dengan kasus aktif dan total kasus rendah (kiri bawah), dan daerah dengan kasus aktif rendah, namun total kasus tinggi (kanan bawah)  
+  
+Diagram lingkaran memperlihatkan proporsi jumlah total kasus sembuh, meninggal, dan aktif pada tanggal yang dipilih.  
+  
+  
+Pada **TREN DAERAH** dapat dilihat:  
+1. Tren total kasus terkonfirmasi positif untuk daerah yang dipilih  
+2. Tren total sembuh untuk daerah yang dipilih  
+3. Tren total kasus kematian untuk daerah yang dipilih  
+4. Tren total kasus aktif untuk daerah yang dipilih  
+ 
+Diagram lingkaran memperlihatkan proporsi jumlah total kasus sembuh, meninggal, dan aktif pada Kota/Kabupaten yang dipilih.  
+  
+  
+Pada **TABEL** dapat dilihat Data Kasus harian Covid-19 di Jawa Barat, dan Jumlah Tenaga Kesehatan di setiap Rumah Sakit di Jawa Barat.  
+  
+Tampilan tabel dibatasi 10 baris, namun ada juga pilihan jumlah baris yang lain. Untuk melihat data selanjutnya dapat menggunakan petunjuk di bawah tabel.  
+Panjang *bar* di sini menunjukkan besar angka sehingga secara cepat dapat dilihat semakin panjang bar semakin besar jumlah kasus.  
+  
+Pada Tabel Data Kasus Covid. dapat diurutkan berdasarkan Tanggal, Kota/Kabupaten, Total Kasus, Total Sembuh, Total Kematian, atau Total Kasus Aktif.  
+Pada Tabel Data Tenaga Kesehatan dan Rumah Sakit dapat diurutkan berdasarkan Kota/Kabupaten, Nama Rumah Sakit, dan Jumlah Tenaga Kesehatan.  
+  
+Untuk mencari sesuatu yang spesifik bisa menggunakan fasilitas *Search*.
+  
+  
+### Tentang
+  
+Proyek ini merupakan bagian dari tugas untuk Mata Kuliah STA563 - Eksplorasi dan Visualisasi Data dalam membuat Visualisasi Interaktif menggunakan *ShinyApp*.  
+   
+Dashboard **Pantau COVID-19 Jawa Barat** dikerjakan oleh Kelompok 1 yang terdiri dari :  
+1. Maulida Fajrining Tyas (G1501202041)  
+2. Sitti Nurhaliza (G1501201038)  
+3. Reza Felix Citra (G1501201014)  
+   
+   
+Dosen Pengampu Mata Kuliah :  
+1. Dr. Anwar Fitrianto, M.Sc  
+2. Dr. Bagus Sartono, M.Si  
+3. Dr. Agus M. Soleh, M.T  
+   
+   
+Departemen Statistika    
+Sekolah Pascasarjana  
+**Institut Pertanian Bogor**  
+Jl. Meranti Wing 22 Level 4  
+Kampus IPB Darmaga  
+Bogor 16680, Jawa Barat, Indonesia  
+Tlp./Fax +62 (251) 8624535  
+E-mail : statistika@apps.ipb.ac.id   
+Website : https://www.stat.ipb.ac.id/
+
+### Sumber Data
+  
+  
+- Pusat Informasi & Koordinasi Covid-19 Jawa Barat
+(https://pikobar.jabarprov.go.id/)
+  
+  
+- BPS Provinsi Jawa Barat
+(https://jabar.bps.go.id/indicator/12/133/1/jumlah-penduduk-menurut-kabupaten-kota.html)
+  
+  
+- Badan PPSDM Kesehatan - Kementerian Kesehatan RI
+(http://bppsdmk.kemkes.go.id/info_sdmk/info/distribusi_sdmk_rs_per_prov?prov=32) 
+  
